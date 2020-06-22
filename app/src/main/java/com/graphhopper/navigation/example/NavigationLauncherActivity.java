@@ -32,10 +32,9 @@ import com.android.volley.Response;
 import com.android.volley.VolleyError;
 import com.android.volley.VolleyLog;
 import com.android.volley.toolbox.HttpHeaderParser;
-import com.android.volley.toolbox.JsonObjectRequest;
+import com.android.volley.toolbox.JsonArrayRequest;
 import com.android.volley.toolbox.StringRequest;
 import com.android.volley.toolbox.Volley;
-import com.google.gson.JsonObject;
 import com.graphhopper.directions.api.client.model.GeocodingLocation;
 import com.graphhopper.directions.api.client.model.GeocodingPoint;
 import com.mapbox.android.core.permissions.PermissionsListener;
@@ -61,7 +60,6 @@ import com.mapbox.mapboxsdk.maps.OnMapReadyCallback;
 import com.mapbox.mapboxsdk.maps.Telemetry;
 import com.mapbox.mapboxsdk.plugins.locationlayer.LocationLayerPlugin;
 import com.mapbox.mapboxsdk.plugins.locationlayer.modes.RenderMode;
-import com.mapbox.mapboxsdk.style.light.Position;
 import com.mapbox.services.android.navigation.ui.v5.NavigationLauncher;
 import com.mapbox.services.android.navigation.ui.v5.NavigationLauncherOptions;
 import com.mapbox.services.android.navigation.ui.v5.route.NavigationMapRoute;
@@ -76,6 +74,7 @@ import org.json.JSONObject;
 
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -137,14 +136,13 @@ public class NavigationLauncherActivity extends AppCompatActivity implements OnM
         //mapView.setStyleUrl(getString(R.string.map_view_styleUrl));
 
         routeInfo = findViewById(R.id.route_info);
-        routeInfo.setText(nameChantier+ "\n" +typeRoute);
+        routeInfo.setText(nameChantier+ "\n" + "Route : " + typeRoute.substring(0, 1).toUpperCase() + typeRoute.substring(1));
         mapView.onCreate(savedInstanceState);
         mapView.getMapAsync(this);
         localeUtils = new LocaleUtils();
         if (getSupportActionBar() != null) {
             getSupportActionBar().setTitle("");
         }
-        //showFirstStartIfNecessary();
 
     }
 
@@ -170,7 +168,7 @@ public class NavigationLauncherActivity extends AppCompatActivity implements OnM
         }
     }
 
-    public JSONObject getRoute(){
+    public JSONObject prepareRouteForSending(){
         JSONArray res = new JSONArray();
         int order = 0;
         for (Marker marker : mapboxMap.getMarkers()) {
@@ -193,19 +191,85 @@ public class NavigationLauncherActivity extends AppCompatActivity implements OnM
         return null;
     }
 
+    public void initRoute(JSONArray array) throws JSONException {
+        // Ajoute chaque donnée à la liste de waypoint triable
+        List<Waypoint> waypoints = new ArrayList<>();
+        for (int i=0; i< array.length(); i++){
+            JSONObject waypoint = array.getJSONObject(i);
+            waypoints.add(
+                    new Waypoint(
+                            waypoint.getDouble("longitude"),
+                            waypoint.getDouble("latitude"),
+                            waypoint.getInt("ordre")
+                    )
+            );
+        }
+
+        // Tri la liste des waypoints selon l'ordre
+        Collections.sort(waypoints);
+
+        // Ajoute les marker à la map
+        for (Waypoint w: waypoints ) {
+            LatLng point = new LatLng(w.latitude, w.longitude);
+            MarkerOptions markerOptions = new MarkerOptions()
+                    .position(point);
+            mapboxMap.addMarker(markerOptions);
+            Snackbar.make(mapView, "Marqueur : "+mapboxMap.getMarkers().size()+"/"+25, Snackbar.LENGTH_LONG).show();
+        }
+
+        fetchRoute();
+    }
+
+    public void initWaypoints(){
+        final String URL = BASE_URL + "chantiers/"+idChantier+"/route/"+typeRoute;
+        RequestQueue requestQueue = Volley.newRequestQueue(this);
+        // prepare the Request
+        JsonArrayRequest getRequest = new JsonArrayRequest(Request.Method.GET, URL, null,
+                response -> {
+                    // display response
+                    try {
+                        initRoute(response);
+                    } catch (JSONException e) {
+                        e.printStackTrace();
+                    }
+                    Log.d("Response", response.toString());
+                },
+                new Response.ErrorListener()
+                {
+                    @Override
+                    public void onErrorResponse(VolleyError error) {
+                        Log.d("Error.Response", error.toString());
+                    }
+                }
+        ) {
+            @Override
+            public Map<String, String> getHeaders() throws AuthFailureError {
+                Map<String, String> params = new HashMap<String, String>();
+                params.put("Content-Type", "application/json; charset=UTF-8");
+                params.put("Authorization", "Bearer " + token);
+                return params;
+            }
+        } ;
+
+        // add it to the RequestQueue
+        requestQueue.add(getRequest);
+    }
+
     private void sendRouteToServer() {
-        JSONObject route = getRoute();
+        JSONObject route = prepareRouteForSending();
         RequestQueue requestQueue = Volley.newRequestQueue(this);
         final String requestBody = route.toString();
         String URL = BASE_URL + "chantiers/"+idChantier+"/route/"+typeRoute;
         StringRequest stringRequest = new StringRequest(Request.Method.PUT, URL, new Response.Listener<String>() {
             @Override
             public void onResponse(String response) {
+                Snackbar.make(mapView, "La route a été enregistrée avec succès", Snackbar.LENGTH_LONG ).show();
                 Log.i("VOLLEY", response);
             }
         }, new Response.ErrorListener() {
             @Override
             public void onErrorResponse(VolleyError error) {
+                Snackbar.make(mapView, "Erreur de l'enregistrement de route, veuillez contacter un administrateur", Snackbar.LENGTH_LONG ).show();
                 Log.e("VOLLEY", error.toString());
             }
         }) {
@@ -324,35 +388,6 @@ public class NavigationLauncherActivity extends AppCompatActivity implements OnM
         }
     }
 
-    private void showFirstStartIfNecessary() {
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-        if (sharedPreferences.getInt(getString(R.string.first_start_dialog_key), -1) < FIRST_START_DIALOG_VERSION) {
-            showHelpDialog();
-        }
-    }
-
-    private void showHelpDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle(R.string.help_message_title);
-        builder.setMessage(Html.fromHtml("1. Please note, this is a demo and not a full featured application. The purpose of this application is to provide an easy starting point for developers to create a navigation application with GraphHopper<br/>2. You should enable your GPS/location<br/>3.You can either search for a location using the magnifier icon or by long pressing on the map<br/>4. Start the navigation by tapping the arrow button<br/><br/>This project is 100% open source, contributions are welcome.<br/><br/>Please drive carefully and always abide local law and signs. Roads might be impassible due to construction projects, traffic, weather, or other events."));
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-        builder.setPositiveButton(R.string.agree, new DialogInterface.OnClickListener() {
-            public void onClick(DialogInterface dialog, int id) {
-                SharedPreferences.Editor editor = sharedPreferences.edit();
-                editor.putInt(getString(R.string.first_start_dialog_key), FIRST_START_DIALOG_VERSION);
-                editor.apply();
-            }
-        });
-        builder.setNeutralButton(R.string.github, new DialogInterface.OnClickListener() {
-            public void onClick(DialogInterface dialog, int id) {
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/graphhopper/graphhopper-navigation-example")));
-            }
-        });
-
-        AlertDialog dialog = builder.create();
-        dialog.show();
-    }
-
     private void showNavigationDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle(R.string.legal_title);
@@ -438,6 +473,7 @@ public class NavigationLauncherActivity extends AppCompatActivity implements OnM
         this.mapboxMap.setOnMarkerClickListener(this);
         this.mapboxMap.addOnMapLongClickListener(this);
         initMapRoute();
+        initWaypoints();
 
         this.mapboxMap.setOnInfoWindowClickListener(new MapboxMap.OnInfoWindowClickListener() {
             @Override
@@ -473,8 +509,9 @@ public class NavigationLauncherActivity extends AppCompatActivity implements OnM
         mapboxMap.addMarker(markerOptions);
         Snackbar.make(mapView, "Marqueur : "+mapboxMap.getMarkers().size()+"/"+25, Snackbar.LENGTH_LONG).show();
 
-        addPointToRoute(point.getLatitude(), point.getLongitude());
-        updateRouteAfterWaypointChange();
+        //addPointToRoute(point.getLatitude(), point.getLongitude());
+        //updateRouteAfterWaypointChange();
+        fetchRoute();
     }
 
     private void addPointToRoute(double lat, double lng) {
