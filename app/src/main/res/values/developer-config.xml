@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- This needs to start with pk. and must not be empty -->
+    <string name="mapbox_access_token">pk.eyJ1IjoicWtsdSIsImEiOiJja2ExdHdxdDYwM3dvM2RvZzh6Ynd1Zmx2In0.0Vvg0D0b9cSi5-S4Dju-pQ</string>
+    <!-- This is your GH key, register one at https://www.graphhopper.com/ -->
+    <string name="gh_key" translatable="false">3dcbb461-4602-4a26-85e4-d386678d019e</string>
+    <!-- This is the endpoint for the routing API, please note this endpoint might change in the future, please contact GraphHopper if you want to publish an app using this endpoint-->
+    <string name="base_url" translatable="false">https://graphhopper.com/api/1/navigate/</string>
+</resources>
